@@ -1,0 +1,1 @@
+# Database models for Booking.com clone 
