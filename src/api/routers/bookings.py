@@ -5,7 +5,7 @@ from typing import List, Optional
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
-from ..database import get_db
+from ..database import get_db, get_tax_rates
 from ..models.booking import Booking, BookingStatus, PaymentStatus, PaymentMethod
 from ..models.property import Room, Property, RoomRate
 from ..models.user import User
@@ -127,9 +127,10 @@ def calculate_price(
             genius_discount = base_price * (discount_percentage / 100)
             genius_discount_percentage = discount_percentage
     
-    # Calculate taxes (simplified - 10% tax rate)
+    # Calculate taxes (use environment-based tax rates)
     subtotal = base_price - genius_discount
-    taxes = subtotal * 0.10
+    tax_rate, city_tax = get_tax_rates()
+    taxes = subtotal * (tax_rate + city_tax)
     
     # Total price
     total_price = subtotal + taxes

@@ -2,7 +2,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 from jose import JWTError, jwt
 from passlib.context import CryptContext
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, status, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 import secrets
@@ -21,6 +21,15 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 # JWT token security
 security = HTTPBearer()
+
+class OptionalHTTPBearer(HTTPBearer):
+    async def __call__(self, request: Request):
+        authorization: str = request.headers.get("Authorization")
+        if not authorization:
+            return None
+        return await super().__call__(request)
+
+optional_security = OptionalHTTPBearer()
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     """Verify a password against its hash."""
@@ -78,6 +87,17 @@ def get_current_active_user(current_user: User = Depends(get_current_user)) -> U
     if not current_user.is_active:
         raise HTTPException(status_code=400, detail="Inactive user")
     return current_user
+
+def get_optional_user(
+    credentials: HTTPAuthorizationCredentials = Depends(optional_security),
+    db: Session = Depends(get_db)
+) -> Optional[User]:
+    if credentials is None:
+        return None
+    try:
+        return get_current_active_user(current_user=get_current_user(credentials, db))
+    except HTTPException:
+        return None
 
 def generate_booking_reference() -> str:
     """Generate a unique booking reference."""

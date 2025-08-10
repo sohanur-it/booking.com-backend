@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, time
 from zoneinfo import ZoneInfo
 from math import radians, cos, sin, asin, sqrt
 
-from ..database import get_db
+from ..database import get_db, get_tax_rates
 from ..models.property import Property, Room, RoomRate
 from ..models.booking import Booking, BookingStatus
 from ..models.review import Review
@@ -15,7 +15,7 @@ from ..schemas.property import (
     RoomCreate, RoomUpdate, RoomResponse, PropertyWithRooms, PropertySearchResponse,
     RoomWithRates, RoomRateResponse
 )
-from ..auth import get_current_active_user, calculate_genius_level
+from ..auth import get_current_active_user, calculate_genius_level, get_optional_user
 from ..models.user import User
 
 router = APIRouter(prefix="/properties", tags=["Properties"])
@@ -72,7 +72,8 @@ def search_properties(
     sort_order: str = Query("asc"),
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: Optional[User] = Depends(get_optional_user),
 ):
     """Search for properties with filters and live room availability."""
     query = db.query(Property).filter(Property.is_active == True)
@@ -286,6 +287,27 @@ def search_properties(
                 }
                 for rr in rates
             ]
+            # Calculate pricing info (property search)
+            base_price = room.base_price
+            genius_price = room.genius_price if room.genius_price else base_price
+            tax_rate, city_tax = get_tax_rates()
+            if current_user:
+                level, _ = calculate_genius_level(current_user.total_bookings, current_user.total_spent)
+                subtotal = genius_price if level > 0 else base_price
+                show_genius = level > 0
+            else:
+                subtotal = base_price
+                show_genius = False
+            taxes = subtotal * (tax_rate + city_tax)
+            total_price = subtotal + taxes
+            print(f"current_user: {current_user} show_genius: {show_genius}")
+            room_dict["pricing"] = {
+                "base_price": base_price,
+                **({"genius_price": genius_price} if (current_user is not None and show_genius) else {}),
+                "taxes": taxes,
+                "total_price": total_price,
+                "currency": room.currency if hasattr(room, 'currency') and room.currency else (prop.currency or "USD")
+            }
             rooms_with_remaining.append(room_dict)
 
             if room.base_price < min_price and (remaining is None or remaining > 0):
@@ -344,7 +366,7 @@ def get_property_details(
     children: int = Query(0),
     rooms: int = Query(1),
     db: Session = Depends(get_db),
-    current_user: Optional[User] = Depends(get_current_active_user),
+    current_user: Optional[User] = Depends(get_optional_user),
 ):
     """Single, rich payload for property details page.
     Includes location, photos, review aggregates, amenities, availability, policies, reviews, and simple nearby hints.
@@ -416,6 +438,17 @@ def get_property_details(
         if adults + children > room.max_guests:
             continue
         base = room.base_price
+        genius_price = room.genius_price if room.genius_price else base
+        tax_rate, city_tax = get_tax_rates()
+        if current_user:
+            level, _ = calculate_genius_level(current_user.total_bookings, current_user.total_spent)
+            subtotal = genius_price if level > 0 else base
+            show_genius = level > 0
+        else:
+            subtotal = base
+            show_genius = False
+        taxes = subtotal * (tax_rate + city_tax)
+        total_price = subtotal + taxes
         final = base
         discount_block = None
         if discount_pct > 0:
@@ -491,6 +524,14 @@ def get_property_details(
             ],
             "available_dates": available_dates,
             "daily": daily,
+        }
+        room_block["pricing"] = {
+            "base_price": base,
+            #details page..
+            **({"genius_price": genius_price} if show_genius else {}),
+            "taxes": taxes,
+            "total_price": total_price,
+            "currency": room.currency if hasattr(room, 'currency') and room.currency else (prop.currency or "USD")
         }
         if check_in and check_out:
             room_block["remaining"] = min_remaining

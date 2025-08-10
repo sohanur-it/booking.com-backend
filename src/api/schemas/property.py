@@ -173,6 +173,27 @@ class RoomResponse(BaseModel):
     class Config:
         from_attributes = True
 
+class RoomResponseNoGenius(BaseModel):
+    id: int
+    property_id: int
+    name: str
+    description: Optional[str]
+    room_type: Optional[str]
+    max_guests: int
+    size_sqm: Optional[float]
+    room_amenities: Optional[List[str]]
+    base_price: float
+    total_quantity: Optional[int] = None
+    available_quantity: Optional[int] = None
+    images: Optional[List[str]]
+    created_at: datetime
+    updated_at: datetime
+    remaining: Optional[int] = None
+
+    class Config:
+        from_attributes = True
+        
+
 class RoomRateResponse(BaseModel):
     id: int
     room_id: int

@@ -56,4 +56,9 @@ def check_tables_exist():
         db.close()
         return True
     except Exception:
-        return False 
+        return False
+
+def get_tax_rates():
+    tax_rate = float(os.environ.get('TAX_RATE', 0.1475))
+    city_tax = float(os.environ.get('CITY_TAX', 0.04285))
+    return tax_rate, city_tax 

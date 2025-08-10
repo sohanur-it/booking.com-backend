@@ -29,6 +29,11 @@ class BookingCreate(BaseModel):
     guest_names: Optional[List[str]] = None
     special_requests: Optional[str] = None
     payment_method_id: Optional[int] = None
+    address: Optional[str] = None
+    city: Optional[str] = None
+    phone_number: Optional[str] = None
+    estimated_arrival_time: Optional[str] = None
+    promo_code: Optional[str] = None
 
     @field_validator('check_out_date')
     @classmethod
@@ -87,6 +92,11 @@ class BookingResponse(BaseModel):
     updated_at: datetime
     confirmed_at: Optional[datetime]
     cancelled_at: Optional[datetime]
+    address: Optional[str]
+    city: Optional[str]
+    phone_number: Optional[str]
+    estimated_arrival_time: Optional[str]
+    promo_code: Optional[str]
 
     model_config = dict(from_attributes=True)
 
