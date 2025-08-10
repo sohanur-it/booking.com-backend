@@ -7,7 +7,7 @@ from datetime import datetime
 from ..database import get_db
 from ..models.review import Review, ReviewResponse as ReviewResponseModel
 from ..models.booking import Booking, BookingStatus
-from ..models.property import Property
+from ..models.property import Property, Room
 from ..models.user import User
 from ..schemas.review import (
     ReviewCreate, ReviewUpdate, ReviewResponse, ReviewWithProperty,
@@ -26,14 +26,18 @@ def create_review(
 ):
     """Create a new review for a property."""
     
-    # Verify the booking exists and belongs to the user
-    booking = db.query(Booking).filter(
-        and_(
+    # Verify the booking exists, belongs to the user, and matches the property via the booked room
+    booking = (
+        db.query(Booking)
+        .join(Room, Booking.room_id == Room.id)
+        .filter(
             Booking.id == review_data.booking_id,
             Booking.user_id == current_user.id,
-            Booking.property_id == review_data.property_id
+            Room.property_id == review_data.property_id,
         )
-    ).first()
+        .first()
+    )
+
     
     if not booking:
         raise HTTPException(
@@ -48,6 +52,8 @@ def create_review(
             Review.user_id == current_user.id
         )
     ).first()
+
+    print(existing_review, "reviews------")
     
     if existing_review:
         raise HTTPException(

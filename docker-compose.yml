@@ -1,0 +1,13 @@
+services:
+  backend:
+    build: .
+    environment:
+      DATABASE_URL: sqlite:///./booking_clone.db
+      SEED_DATA: "false"  # set "true" to seed on start
+    ports:
+      - "8000:8000"
+    volumes:
+      - .:/app
+    command: []
+
+

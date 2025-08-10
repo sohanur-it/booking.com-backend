@@ -1,4 +1,4 @@
-from pydantic import BaseModel, validator
+from pydantic import BaseModel, field_validator
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 
@@ -20,6 +20,9 @@ class PropertySearch(BaseModel):
     property_type: Optional[List[str]] = None
     amenities: Optional[List[str]] = None
     facilities: Optional[List[str]] = None
+    room_facilities: Optional[List[str]] = None
+    near_landmark: Optional[str] = None  # beach, city_centre
+    neighbourhood: Optional[str] = None
     
     # Sorting
     sort_by: Optional[str] = "recommended"  # price, rating, distance, etc.
@@ -47,9 +50,13 @@ class PropertyCreate(BaseModel):
     website: Optional[str] = None
     amenities: Optional[List[str]] = None
     facilities: Optional[List[str]] = None
+    room_facilities: Optional[List[str]] = None
     base_price: Optional[float] = None
     currency: str = "USD"
     images: Optional[List[str]] = None
+    supports_free_cancellation: bool = True
+    supports_no_prepayment: bool = False
+    neighbourhood: Optional[str] = None
 
 class PropertyUpdate(BaseModel):
     name: Optional[str] = None
@@ -68,10 +75,14 @@ class PropertyUpdate(BaseModel):
     website: Optional[str] = None
     amenities: Optional[List[str]] = None
     facilities: Optional[List[str]] = None
+    room_facilities: Optional[List[str]] = None
     base_price: Optional[float] = None
     currency: Optional[str] = None
     images: Optional[List[str]] = None
     is_active: Optional[bool] = None
+    supports_free_cancellation: Optional[bool] = None
+    supports_no_prepayment: Optional[bool] = None
+    neighbourhood: Optional[str] = None
 
 # Property Response
 class PropertyResponse(BaseModel):
@@ -92,15 +103,25 @@ class PropertyResponse(BaseModel):
     website: Optional[str]
     amenities: Optional[List[str]]
     facilities: Optional[List[str]]
+    room_facilities: Optional[List[str]] = None
     base_price: Optional[float]
     currency: str
     is_active: bool
+    supports_free_cancellation: bool = False
+    supports_no_prepayment: bool = False
+    neighbourhood: Optional[str] = None
     images: Optional[List[str]]
     created_at: datetime
     updated_at: datetime
     
     class Config:
         from_attributes = True
+
+    @field_validator('supports_free_cancellation', 'supports_no_prepayment', mode='before')
+    def coerce_bool_defaults(cls, v):
+        if v is None:
+            return False
+        return bool(v)
 
 # Room Create/Update
 class RoomCreate(BaseModel):
@@ -142,11 +163,12 @@ class RoomResponse(BaseModel):
     room_amenities: Optional[List[str]]
     base_price: float
     genius_price: Optional[float]
-    total_quantity: int
-    available_quantity: int
+    total_quantity: Optional[int] = None
+    available_quantity: Optional[int] = None
     images: Optional[List[str]]
     created_at: datetime
     updated_at: datetime
+    remaining: Optional[int] = None
     
     class Config:
         from_attributes = True

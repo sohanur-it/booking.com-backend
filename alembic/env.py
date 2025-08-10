@@ -14,6 +14,8 @@ from api.models.user import User
 from api.models.property import Property, Room
 from api.models.booking import Booking, PaymentMethod
 from api.models.review import Review, ReviewResponse
+from api.models.flight import Airport, Carrier, Flight, FlightBooking
+from api.models.car_rental import CarVendor, CarLocation, Car, CarBooking
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.

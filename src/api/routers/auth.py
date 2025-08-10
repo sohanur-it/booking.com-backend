@@ -12,8 +12,13 @@ from ..auth import (
     create_access_token, 
     get_current_active_user,
     ACCESS_TOKEN_EXPIRE_MINUTES,
-    calculate_genius_level
+    calculate_genius_level,
+    get_current_user,
+    ALGORITHM,
+    SECRET_KEY
 )
+from jose import jwt, JWTError
+# from ..config import settings
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
@@ -84,38 +89,53 @@ def login(user_data: UserLogin, db: Session = Depends(get_db)):
         token_type="bearer",
         user=UserResponse.from_orm(user)
     )
-
 @router.post("/password-reset-request")
 def request_password_reset(request: PasswordResetRequest, db: Session = Depends(get_db)):
-    """Request password reset (sends reset token via email)."""
+    """Request password reset (send reset token via email)."""
     user = db.query(User).filter(User.email == request.email).first()
-    if user:
-        # In a real application, you would send an email with the reset token
-        # For this demo, we'll just return a success message
+    if not user:
         return {"message": "If the email exists, a password reset link has been sent"}
-    
-    # Don't reveal if email exists or not for security
-    return {"message": "If the email exists, a password reset link has been sent"}
+
+    # Create reset token (short expiry)
+    expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    reset_token = create_access_token(
+        data={"sub": user.email, "action": "password_reset"},
+        expires_delta=expires
+    )
+
+    # TODO: Send token via email with link like:
+    # reset_url = f"https://yourfrontend.com/reset-password?token={reset_token}"
+    # send_email(user.email, reset_url)
+
+    return {
+        "message": "If the email exists, a password reset link has been sent",
+        "reset_token": reset_token  # Only for testing — remove in production
+    }
 
 @router.post("/password-reset")
 def reset_password(reset_data: PasswordReset, db: Session = Depends(get_db)):
     """Reset password using token."""
-    # In a real application, you would verify the token
-    # For this demo, we'll assume the token is valid
+    try:
+        payload = jwt.decode(reset_data.token, SECRET_KEY, algorithms=[ALGORITHM])
+        
+        if payload.get("action") != "password_reset":
+            raise HTTPException(status_code=400, detail="Invalid reset token")
+
+        email = payload.get("sub")
+        if not email:
+            raise HTTPException(status_code=400, detail="Invalid token payload")
+    except JWTError:
+        raise HTTPException(status_code=400, detail="Invalid or expired reset token")
     
-    # Find user (in real app, you'd get user from token)
-    user = db.query(User).filter(User.email == "user@example.com").first()
+    user = db.query(User).filter(User.email == email).first()
     if not user:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid reset token"
-        )
-    
-    # Update password
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="User not found")
+
     user.password_hash = get_password_hash(reset_data.new_password)
     db.commit()
-    
+
     return {"message": "Password reset successfully"}
+
 
 @router.get("/me", response_model=UserResponse)
 def get_current_user_info(current_user: User = Depends(get_current_active_user)):

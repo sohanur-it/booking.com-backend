@@ -1,0 +1,19 @@
+[
+  {
+    "flight_number": "AA123",
+    "carrier_code": "AA",
+    "origin_code": "JFK",
+    "destination_code": "LAX",
+    "departure_time": "2025-09-13T09:00:00",
+    "arrival_time": "2025-09-13T15:00:00",
+    "duration_minutes": 360,
+    "is_nonstop": true,
+    "base_price": 300,
+    "currency": "USD",
+    "seats_economy": 100,
+    "seats_business": 20,
+    "seats_first": 8
+  }
+]
+
+

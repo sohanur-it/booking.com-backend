@@ -1,0 +1,99 @@
+[
+  {
+    "name": "Zeds Hostel Bangkok",
+    "address": "Bangkok Old Town, Bangkok",
+    "city": "Bangkok",
+    "country": "Thailand",
+    "description": "Double Room with Private Bathroom, 1 extra-large double bed, 1.1 km from centre, Limited-time Deal.",
+    "star_rating": 3,
+    "amenities": ["Free WiFi", "Air conditioning", "24-hour front desk"],
+    "images": [
+      "https://cf.bstatic.com/xdata/images/hotel/max1024x768/12345678.jpg",
+      "https://cf.bstatic.com/xdata/images/hotel/max1024x768/87654321.jpg"
+    ],
+    "rooms": [
+      {
+        "name": "Double Room with Private Bathroom",
+        "room_type": "double",
+        "max_guests": 2,
+        "base_price": 50,
+        "genius_price": 45,
+        "images": [
+          "https://cf.bstatic.com/xdata/images/room/max1024x768/12345678.jpg"
+        ]
+      }
+    ]
+  },
+  {
+    "name": "EP1 shophouse",
+    "address": "Sukhumvit, Bangkok (Sukhumvit)",
+    "city": "Bangkok",
+    "country": "Thailand",
+    "description": "Queen Studio, Entire studio, 1 bathroom, 35 m², 1 large double bed, 12.6 km from centre.",
+    "star_rating": 4,
+    "amenities": ["Free WiFi", "Non-smoking rooms", "Family rooms"],
+    "images": [
+      "https://cf.bstatic.com/xdata/images/hotel/max1024x768/23456789.jpg"
+    ],
+    "rooms": [
+      {
+        "name": "Queen Studio",
+        "room_type": "studio",
+        "max_guests": 2,
+        "base_price": 40,
+        "genius_price": 36,
+        "images": [
+          "https://cf.bstatic.com/xdata/images/room/max1024x768/23456789.jpg"
+        ]
+      }
+    ]
+  },
+  {
+    "name": "The Manhattan at Times Square Hotel",
+    "address": "790 7th Ave, New York, NY 10019",
+    "city": "New York",
+    "country": "USA",
+    "description": "Located in the heart of Manhattan, close to Times Square and Central Park.",
+    "star_rating": 4,
+    "amenities": ["Free WiFi", "Fitness centre", "Parking"],
+    "images": [
+      "https://cf.bstatic.com/xdata/images/hotel/max1024x768/34567890.jpg"
+    ],
+    "rooms": [
+      {
+        "name": "Deluxe King Room",
+        "room_type": "king",
+        "max_guests": 2,
+        "base_price": 120,
+        "genius_price": 110,
+        "images": [
+          "https://cf.bstatic.com/xdata/images/room/max1024x768/34567890.jpg"
+        ]
+      }
+    ]
+  },
+  {
+    "name": "Hotel Le Meurice",
+    "address": "228 Rue de Rivoli, 75001 Paris",
+    "city": "Paris",
+    "country": "France",
+    "description": "Luxury hotel in the heart of Paris, near the Louvre and Tuileries Garden.",
+    "star_rating": 5,
+    "amenities": ["Free WiFi", "Spa and wellness centre", "Restaurant"],
+    "images": [
+      "https://cf.bstatic.com/xdata/images/hotel/max1024x768/45678901.jpg"
+    ],
+    "rooms": [
+      {
+        "name": "Superior Double Room",
+        "room_type": "double",
+        "max_guests": 2,
+        "base_price": 300,
+        "genius_price": 270,
+        "images": [
+          "https://cf.bstatic.com/xdata/images/room/max1024x768/45678901.jpg"
+        ]
+      }
+    ]
+  }
+]

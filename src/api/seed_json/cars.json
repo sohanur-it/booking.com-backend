@@ -1,0 +1,5 @@
+[
+  {"vendor_code": "CCAR", "location_city": "Miami", "make": "Toyota", "model": "RAV4", "car_class": "suv", "seats": 5, "doors": 4, "transmission": "automatic", "air_conditioning": true, "base_price_per_day": 55, "currency": "USD", "available_quantity": 5}
+]
+
+

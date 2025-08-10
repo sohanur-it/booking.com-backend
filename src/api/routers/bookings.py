@@ -11,11 +11,68 @@ from ..models.user import User
 from ..schemas.booking import (
     BookingCreate, BookingUpdate, BookingResponse, BookingWithRoom,
     BookingCancellation, PaymentMethodCreate, PaymentMethodResponse,
-    BookingConfirmation, PriceCalculationRequest, PriceCalculationResponse
+    BookingConfirmation, PriceCalculationRequest, PriceCalculationResponse,
+    CartItem, CartQuoteRequest, CartItemQuote, CartQuoteResponse,
+    BulkBookingRequest, BulkBookingResponse,
 )
 from ..auth import get_current_active_user, generate_booking_reference, calculate_genius_level
 
 router = APIRouter(prefix="/bookings", tags=["Bookings"])
+
+# Payment methods endpoints (moved to top after router definition)
+@router.post("/payment-methods", response_model=PaymentMethodResponse)
+def create_payment_method(
+    payment_data: PaymentMethodCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """Add a new payment method."""
+    if payment_data.is_default:
+        db.query(PaymentMethod).filter(
+            PaymentMethod.user_id == current_user.id
+        ).update({"is_default": False})
+    db_payment_method = PaymentMethod(
+        user_id=current_user.id,
+        **payment_data.dict()
+    )
+    db.add(db_payment_method)
+    db.commit()
+    db.refresh(db_payment_method)
+    return PaymentMethodResponse.from_orm(db_payment_method)
+
+@router.get("/payment-methods", response_model=List[PaymentMethodResponse])
+def get_payment_methods(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """Get all payment methods for the current user."""
+    payment_methods = db.query(PaymentMethod).filter(
+        PaymentMethod.user_id == current_user.id,
+        PaymentMethod.is_active == True
+    ).all()
+    return [PaymentMethodResponse.from_orm(pm) for pm in payment_methods]
+
+@router.delete("/payment-methods/{payment_method_id}")
+def delete_payment_method(
+    payment_method_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """Delete a payment method."""
+    payment_method = db.query(PaymentMethod).filter(
+        and_(
+            PaymentMethod.id == payment_method_id,
+            PaymentMethod.user_id == current_user.id
+        )
+    ).first()
+    if not payment_method:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Payment method not found"
+        )
+    payment_method.is_active = False
+    db.commit()
+    return {"message": "Payment method deleted successfully"}
 
 @router.post("/calculate-price", response_model=PriceCalculationResponse)
 def calculate_price(
@@ -90,42 +147,36 @@ def create_booking(
     current_user: User = Depends(get_current_active_user)
 ):
     """Create a new booking."""
-    
-    # Verify room exists and is available
+
+    # Verify room exists
     room = db.query(Room).filter(Room.id == booking_data.room_id).first()
     if not room:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Room not found"
-        )
-    
-    # Check availability
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Room not found")
+
+    # Nights calculation (redundant due to validator but kept for safety)
     nights = (booking_data.check_out_date - booking_data.check_in_date).days
     if nights <= 0:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Check-out date must be after check-in date"
-        )
-    
-    # Check if room is available for the dates
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Check-out date must be after check-in date")
+
+    # Check room availability for the requested dates
     existing_bookings = db.query(Booking).filter(
         and_(
             Booking.room_id == booking_data.room_id,
             Booking.status.in_([BookingStatus.CONFIRMED, BookingStatus.PENDING]),
             or_(
-                and_(Booking.check_in_date < booking_data.check_out_date, 
-                     Booking.check_out_date > booking_data.check_in_date)
+                and_(
+                    Booking.check_in_date < booking_data.check_out_date,
+                    Booking.check_out_date > booking_data.check_in_date
+                )
             )
         )
     ).count()
-    
-    if existing_bookings >= room.available_quantity:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Room not available for selected dates"
-        )
-    
-    # Calculate price
+
+    remaining = max(0, room.available_quantity - existing_bookings)
+    if remaining < booking_data.num_rooms:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Room not available for selected dates")
+
+    # Calculate price (assuming you have this implemented)
     price_request = PriceCalculationRequest(
         room_id=booking_data.room_id,
         check_in_date=booking_data.check_in_date,
@@ -134,12 +185,12 @@ def create_booking(
         num_rooms=booking_data.num_rooms,
         user_id=current_user.id
     )
-    
     price_calc = calculate_price(price_request, db, current_user)
-    
-    # Create booking
+
+    # Create booking reference (assumed function)
     booking_reference = generate_booking_reference()
-    
+
+    # Create booking entry
     db_booking = Booking(
         booking_reference=booking_reference,
         user_id=current_user.id,
@@ -161,12 +212,12 @@ def create_booking(
         status=BookingStatus.PENDING,
         payment_status=PaymentStatus.PENDING
     )
-    
+
     db.add(db_booking)
     db.commit()
     db.refresh(db_booking)
-    
-    return BookingResponse.from_orm(db_booking)
+
+    return BookingResponse.model_validate(db_booking)
 
 @router.get("/", response_model=List[BookingWithRoom])
 def get_user_bookings(
@@ -270,6 +321,125 @@ def confirm_booking(
     
     return BookingResponse.from_orm(booking)
 
+
+@router.post("/quote", response_model=CartQuoteResponse)
+def quote_cart(
+    payload: CartQuoteRequest,
+    db: Session = Depends(get_db),
+    current_user: Optional[User] = Depends(get_current_active_user),
+):
+    items_quotes: list[CartItemQuote] = []
+    unavailable: list[int] = []
+    subtotal = 0.0
+    taxes_total = 0.0
+    currency = "USD"
+
+    for item in payload.items:
+        room = db.query(Room).filter(Room.id == item.room_id).first()
+        if not room:
+            unavailable.append(item.room_id)
+            continue
+        currency = room.property.currency if room.property else currency
+        # Availability
+        overlapping = db.query(Booking).filter(
+            and_(
+                Booking.room_id == item.room_id,
+                Booking.status.in_([BookingStatus.CONFIRMED, BookingStatus.PENDING]),
+                Booking.check_in_date < payload.check_out_date,
+                Booking.check_out_date > payload.check_in_date,
+            )
+        ).count()
+        remaining = max(0, (room.available_quantity or 0) - overlapping)
+        if remaining < item.num_rooms:
+            unavailable.append(item.room_id)
+            items_quotes.append(CartItemQuote(
+                room_id=item.room_id,
+                available=remaining,
+                requested=item.num_rooms,
+                base_price=0.0,
+                genius_discount=0.0,
+                taxes=0.0,
+                total_price=0.0,
+                currency=currency,
+            ))
+            continue
+
+        price_req = PriceCalculationRequest(
+            room_id=item.room_id,
+            check_in_date=payload.check_in_date,
+            check_out_date=payload.check_out_date,
+            num_guests=item.num_guests,
+            num_rooms=item.num_rooms,
+        )
+        price = calculate_price(price_req, db, current_user)
+        items_quotes.append(CartItemQuote(
+            room_id=item.room_id,
+            available=remaining,
+            requested=item.num_rooms,
+            base_price=price.base_price,
+            genius_discount=price.genius_discount,
+            taxes=price.taxes,
+            total_price=price.total_price,
+            currency=price.currency,
+        ))
+        subtotal += price.base_price - price.genius_discount
+        taxes_total += price.taxes
+
+    total = subtotal + taxes_total
+    return CartQuoteResponse(
+        items=items_quotes,
+        subtotal=subtotal,
+        taxes=taxes_total,
+        total=total,
+        currency=currency,
+        unavailable_items=unavailable,
+    )
+
+
+## Cart endpoints removed as per requirements (stateless multi-room flow)
+
+
+@router.post("/bulk-book", response_model=BulkBookingResponse)
+def bulk_book(
+    payload: BulkBookingRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    # Quote via existing quote_cart
+    quote = quote_cart(CartQuoteRequest(items=payload.items, check_in_date=payload.check_in_date, check_out_date=payload.check_out_date), db, current_user)
+    if quote.unavailable_items:
+        raise HTTPException(status_code=400, detail={"unavailable_items": quote.unavailable_items})
+
+    created: list[int] = []
+    for iq in quote.items:
+        db_booking = Booking(
+            booking_reference=generate_booking_reference(),
+            user_id=current_user.id,
+            room_id=iq.room_id,
+            check_in_date=payload.check_in_date,
+            check_out_date=payload.check_out_date,
+            num_guests=next(i.num_guests for i in payload.items if i.room_id == iq.room_id),
+            num_rooms=next(i.num_rooms for i in payload.items if i.room_id == iq.room_id),
+            base_price=iq.base_price,
+            genius_discount=iq.genius_discount,
+            taxes=iq.taxes,
+            total_price=iq.total_price,
+            currency=iq.currency,
+            free_cancellation=True,
+            status=BookingStatus.PENDING,
+            payment_status=PaymentStatus.PENDING,
+        )
+        db.add(db_booking); db.commit(); db.refresh(db_booking)
+        created.append(db_booking.id)
+
+    return BulkBookingResponse(
+        booking_ids=created,
+        subtotal=quote.subtotal,
+        taxes=quote.taxes,
+        total=quote.total,
+        currency=quote.currency,
+    )
+
 @router.put("/{booking_id}/cancel", response_model=BookingResponse)
 def cancel_booking(
     booking_id: int,
@@ -321,68 +491,4 @@ def cancel_booking(
     db.commit()
     db.refresh(booking)
     
-    return BookingResponse.from_orm(booking)
-
-# Payment methods endpoints
-@router.post("/payment-methods", response_model=PaymentMethodResponse)
-def create_payment_method(
-    payment_data: PaymentMethodCreate,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
-):
-    """Add a new payment method."""
-    
-    # Set other payment methods as non-default if this one is default
-    if payment_data.is_default:
-        db.query(PaymentMethod).filter(
-            PaymentMethod.user_id == current_user.id
-        ).update({"is_default": False})
-    
-    db_payment_method = PaymentMethod(
-        user_id=current_user.id,
-        **payment_data.dict()
-    )
-    
-    db.add(db_payment_method)
-    db.commit()
-    db.refresh(db_payment_method)
-    
-    return PaymentMethodResponse.from_orm(db_payment_method)
-
-@router.get("/payment-methods", response_model=List[PaymentMethodResponse])
-def get_payment_methods(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
-):
-    """Get all payment methods for the current user."""
-    payment_methods = db.query(PaymentMethod).filter(
-        PaymentMethod.user_id == current_user.id,
-        PaymentMethod.is_active == True
-    ).all()
-    
-    return [PaymentMethodResponse.from_orm(pm) for pm in payment_methods]
-
-@router.delete("/payment-methods/{payment_method_id}")
-def delete_payment_method(
-    payment_method_id: int,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
-):
-    """Delete a payment method."""
-    payment_method = db.query(PaymentMethod).filter(
-        and_(
-            PaymentMethod.id == payment_method_id,
-            PaymentMethod.user_id == current_user.id
-        )
-    ).first()
-    
-    if not payment_method:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Payment method not found"
-        )
-    
-    payment_method.is_active = False
-    db.commit()
-    
-    return {"message": "Payment method deleted successfully"} 
+    return BookingResponse.from_orm(booking) 

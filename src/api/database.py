@@ -23,6 +23,10 @@ from .models.user import User
 from .models.property import Property, Room
 from .models.booking import Booking, PaymentMethod
 from .models.review import Review, ReviewResponse
+from .models.flight import Airport, Carrier, Flight, FlightBooking
+from .models.car_rental import CarVendor, CarLocation, Car, CarBooking
+from .models.metadata import FacilityCode
+# Cart models removed (stateless flow)
 
 # Dependency to get database session
 def get_db():

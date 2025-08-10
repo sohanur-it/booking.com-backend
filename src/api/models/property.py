@@ -35,6 +35,13 @@ class Property(Base):
     currency = Column(String(3), default="USD")
     is_active = Column(Boolean, default=True)
     
+    # Policies (for filtering)
+    supports_free_cancellation = Column(Boolean, default=True)
+    supports_no_prepayment = Column(Boolean, default=False)
+    
+    # Location details
+    neighbourhood = Column(String(100))
+    
     # Images
     images = Column(JSON)  # JSON array of image URLs
     
@@ -80,6 +87,23 @@ class Room(Base):
     # Relationships
     property = relationship("Property", back_populates="rooms")
     bookings = relationship("Booking", back_populates="room")
+    rates = relationship("RoomRate", back_populates="room", cascade="all, delete-orphan")
     
     def __repr__(self):
         return f"<Room(id={self.id}, name='{self.name}', property_id={self.property_id})>" 
+
+class RoomRate(Base):
+    __tablename__ = "room_rates"
+    id = Column(Integer, primary_key=True)
+    room_id = Column(Integer, ForeignKey("rooms.id"), nullable=False)
+    name = Column(String(100))  # e.g., "Non-refundable", "Breakfast included"
+    description = Column(Text)
+    price = Column(Float, nullable=False)
+    currency = Column(String(3), default="USD")
+    includes_breakfast = Column(Boolean, default=False)
+    includes_parking = Column(Boolean, default=False)
+    free_cancellation = Column(Boolean, default=False)
+    refundable_until = Column(DateTime, nullable=True)
+    pay_at_property = Column(Boolean, default=False)
+    # Relationships
+    room = relationship("Room", back_populates="rates") 

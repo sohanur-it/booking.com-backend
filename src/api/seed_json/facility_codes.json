@@ -1,0 +1,7 @@
+[
+  {"code": "wifi", "label": "Free WiFi", "scope": "property"},
+  {"code": "private_bathroom", "label": "Private bathroom", "scope": "room"},
+  {"code": "beach_front", "label": "Beachfront", "scope": "property"}
+]
+
+

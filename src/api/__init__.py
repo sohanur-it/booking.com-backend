@@ -7,6 +7,7 @@ import os
 
 from .database import create_tables, check_tables_exist
 from .routers import auth, properties, bookings, reviews
+from .routers import flights, car_rentals, filters, metadata, packages, activities
 from .seed_data import seed_database
 
 # Initialize database with Alembic
@@ -119,6 +120,12 @@ def create_app():
     app.include_router(properties.router, prefix="/api/v1")
     app.include_router(bookings.router, prefix="/api/v1")
     app.include_router(reviews.router, prefix="/api/v1")
+    app.include_router(flights.router, prefix="/api/v1")
+    app.include_router(car_rentals.router, prefix="/api/v1")
+    app.include_router(filters.router, prefix="/api/v1")
+    app.include_router(metadata.router, prefix="/api/v1")
+    app.include_router(packages.router, prefix="/api/v1")
+    app.include_router(activities.router, prefix="/api/v1")
 
     def custom_openapi():
         """
@@ -150,33 +157,6 @@ def create_app():
             - Discount calculation (10%, 15%, 20%)
             - Next level requirements tracking
             
-            ### Property Management
-            - Property CRUD operations
-            - Room type management
-            - Amenities and facilities tracking
-            - Property search with advanced filters
-            - Availability calendar logic
-            
-            ### Booking System
-            - Complete booking lifecycle
-            - Price calculation with Genius discounts
-            - Availability checking
-            - Booking confirmation and cancellation
-            - Payment method management
-            
-            ### Review System
-            - Post-stay review submission
-            - Multi-category ratings (cleanliness, comfort, etc.)
-            - Review filtering and sorting
-            - Helpful voting system
-            - Property owner responses
-            
-            ### Search & Discovery
-            - Advanced property search
-            - Price and rating filters
-            - Location-based search
-            - Pagination support
-            
             ## API Endpoints
             
             ### Authentication
@@ -188,38 +168,6 @@ def create_app():
             - `PUT /api/v1/auth/me` - Update user profile
             - `GET /api/v1/auth/genius-info` - Get Genius loyalty info
             
-            ### Properties
-            - `GET /api/v1/properties/search` - Search properties
-            - `GET /api/v1/properties/{id}` - Get property details
-            - `POST /api/v1/properties/` - Create property (admin)
-            - `PUT /api/v1/properties/{id}` - Update property (admin)
-            - `DELETE /api/v1/properties/{id}` - Delete property (admin)
-            - `POST /api/v1/properties/{id}/rooms` - Add room to property
-            - `PUT /api/v1/properties/rooms/{id}` - Update room
-            - `GET /api/v1/properties/rooms/{id}` - Get room details
-            - `DELETE /api/v1/properties/rooms/{id}` - Delete room
-            
-            ### Bookings
-            - `POST /api/v1/bookings/calculate-price` - Calculate booking price
-            - `POST /api/v1/bookings/` - Create booking
-            - `GET /api/v1/bookings/` - Get user bookings
-            - `GET /api/v1/bookings/{id}` - Get booking details
-            - `PUT /api/v1/bookings/{id}/confirm` - Confirm booking
-            - `PUT /api/v1/bookings/{id}/cancel` - Cancel booking
-            - `POST /api/v1/bookings/payment-methods` - Add payment method
-            - `GET /api/v1/bookings/payment-methods` - Get payment methods
-            - `DELETE /api/v1/bookings/payment-methods/{id}` - Delete payment method
-            
-            ### Reviews
-            - `POST /api/v1/reviews/` - Submit review
-            - `GET /api/v1/reviews/` - Search reviews
-            - `GET /api/v1/reviews/{id}` - Get review details
-            - `PUT /api/v1/reviews/{id}` - Update review
-            - `DELETE /api/v1/reviews/{id}` - Delete review
-            - `POST /api/v1/reviews/{id}/helpful` - Mark review helpful
-            - `POST /api/v1/reviews/{id}/response` - Respond to review
-            - `GET /api/v1/reviews/{id}/response` - Get review response
-            
             ### Development
             - `POST /seed-data` - Seed database with sample data
             
@@ -227,11 +175,6 @@ def create_app():
             
             The API uses SQLite with the following main tables:
             - `users` - User accounts and Genius loyalty data
-            - `properties` - Hotel/property information
-            - `rooms` - Room types and availability
-            - `bookings` - Booking records and status
-            - `reviews` - User reviews and ratings
-            - `payment_methods` - User payment information
             
             ## Authentication
             

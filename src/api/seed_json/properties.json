@@ -1,0 +1,60 @@
+[
+  {
+    "name": "The Grand Plaza Hotel",
+    "description": "A luxurious 5-star hotel in the heart of downtown with stunning city views.",
+    "address": "123 Main Street",
+    "city": "New York",
+    "country": "United States",
+    "postal_code": "10001",
+    "latitude": 40.7589,
+    "longitude": -73.9851,
+    "property_type": "hotel",
+    "star_rating": 5,
+    "total_rooms": 200,
+    "amenities": ["wifi", "pool", "spa"],
+    "facilities": ["business_center", "beach_front"],
+    "base_price": 300.0,
+    "currency": "USD",
+    "supports_free_cancellation": true,
+    "supports_no_prepayment": false,
+    "neighbourhood": "Midtown",
+    "rooms": [
+      {
+        "name": "Deluxe King Room",
+        "room_type": "king",
+        "max_guests": 2,
+        "size_sqm": 45.0,
+        "room_amenities": ["private_bathroom", "air_conditioning"],
+        "base_price": 300.0,
+        "genius_price": 255.0,
+        "total_quantity": 50,
+        "available_quantity": 45,
+        "images": ["https://example.com/deluxe-king-1.jpg"],
+        "rates": [
+          {
+            "name": "Non-refundable",
+            "description": "Cheaper rate with no refund if canceled",
+            "price": 280.0,
+            "currency": "USD",
+            "includes_breakfast": false,
+            "includes_parking": false,
+            "free_cancellation": false,
+            "refundable_until": null,
+            "pay_at_property": false
+          },
+          {
+            "name": "Breakfast included",
+            "description": "Includes breakfast and free cancellation up to 24h before",
+            "price": 320.0,
+            "currency": "USD",
+            "includes_breakfast": true,
+            "includes_parking": false,
+            "free_cancellation": true,
+            "refundable_until": "2025-12-01T12:00:00",
+            "pay_at_property": true
+          }
+        ]
+      }
+    ]
+  }
+]
