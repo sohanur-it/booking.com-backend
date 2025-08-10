@@ -7,17 +7,22 @@ from zoneinfo import ZoneInfo
 from math import radians, cos, sin, asin, sqrt
 
 from ..database import get_db
-from ..models.property import Property, Room
+from ..models.property import Property, Room, RoomRate
 from ..models.booking import Booking, BookingStatus
 from ..models.review import Review
 from ..schemas.property import (
     PropertySearch, PropertyCreate, PropertyUpdate, PropertyResponse,
-    RoomCreate, RoomUpdate, RoomResponse, PropertyWithRooms, PropertySearchResponse
+    RoomCreate, RoomUpdate, RoomResponse, PropertyWithRooms, PropertySearchResponse,
+    RoomWithRates, RoomRateResponse
 )
 from ..auth import get_current_active_user, calculate_genius_level
 from ..models.user import User
 
 router = APIRouter(prefix="/properties", tags=["Properties"])
+
+# Default application timezone (US)
+DEFAULT_TZ = ZoneInfo("America/New_York")
+HOLD_MINUTES = 15  # pending bookings hold window
 
 # from fastapi import APIRouter, Depends, HTTPException, status, Query
 # from sqlalchemy.orm import Session
@@ -159,6 +164,9 @@ def search_properties(
 
     # --- Availability check ---
     properties_with_rooms = []
+    # Normalize date inputs: ensure at least one-night window
+    if check_in and check_out and check_out <= check_in:
+        check_out = check_in + timedelta(days=1)
     for prop in properties:
         rooms_with_remaining = []
         best_deal = None
@@ -172,9 +180,10 @@ def search_properties(
 
             min_remaining = None
             if check_in and check_out:
-                tz = ZoneInfo("UTC")
-                start_local = check_in if check_in.tzinfo else check_in.replace(tzinfo=tz)
-                end_local = check_out if check_out.tzinfo else check_out.replace(tzinfo=tz)
+                # Interpret inputs in US timezone by default
+                start_local = check_in if check_in.tzinfo else check_in.replace(tzinfo=DEFAULT_TZ)
+                end_local = check_out if check_out.tzinfo else check_out.replace(tzinfo=DEFAULT_TZ)
+                tz = DEFAULT_TZ
 
                 def day_range(d0, d1):
                     cur = datetime.combine(d0.date(), time(0), tz)
@@ -188,10 +197,20 @@ def search_properties(
                     ds = day_start_utc.replace(tzinfo=None)
                     de = day_end_utc.replace(tzinfo=None)
 
+                    # Count confirmed and only non-expired pending holds
+                    now_us = datetime.now(DEFAULT_TZ)
+                    now_utc = now_us.astimezone(ZoneInfo("UTC")).replace(tzinfo=None)
+                    hold_threshold = now_utc - timedelta(minutes=HOLD_MINUTES)
                     booked_rooms = db.query(func.coalesce(func.sum(Booking.num_rooms), 0)).filter(
                         and_(
                             Booking.room_id == room.id,
-                            Booking.status.in_([BookingStatus.CONFIRMED, BookingStatus.PENDING]),
+                            or_(
+                                Booking.status == BookingStatus.CONFIRMED,
+                                and_(
+                                    Booking.status == BookingStatus.PENDING,
+                                    Booking.created_at >= hold_threshold,
+                                ),
+                            ),
                             Booking.check_in_date < de,
                             Booking.check_out_date > ds,
                         )
@@ -201,17 +220,59 @@ def search_properties(
                     available = max(0, total_qty - int(booked_rooms))
                     if min_remaining is None or available < min_remaining:
                         min_remaining = available
+                # Fallback if no days iterated (edge case)
+                if min_remaining is None:
+                    ds = start_local.astimezone(ZoneInfo("UTC")).replace(tzinfo=None)
+                    de = end_local.astimezone(ZoneInfo("UTC")).replace(tzinfo=None)
+                    now_us = datetime.now(DEFAULT_TZ)
+                    now_utc = now_us.astimezone(ZoneInfo("UTC")).replace(tzinfo=None)
+                    hold_threshold = now_utc - timedelta(minutes=HOLD_MINUTES)
+                    booked_rooms = db.query(func.coalesce(func.sum(Booking.num_rooms), 0)).filter(
+                        and_(
+                            Booking.room_id == room.id,
+                            or_(
+                                Booking.status == BookingStatus.CONFIRMED,
+                                and_(
+                                    Booking.status == BookingStatus.PENDING,
+                                    Booking.created_at >= hold_threshold,
+                                ),
+                            ),
+                            Booking.check_in_date < de,
+                            Booking.check_out_date > ds,
+                        )
+                    ).scalar() or 0
+                    total_qty = room.available_quantity or 0
+                    min_remaining = max(0, total_qty - int(booked_rooms))
 
             remaining = min_remaining
-            if remaining is not None and remaining < requested_rooms:
+            # If dates are provided and the room cannot satisfy the requested number of rooms, skip it
+            if check_in and check_out and remaining is not None and remaining < requested_rooms:
                 continue
-            else:
-                remaining = None  # Do not show remaining if no dates
+            # If no dates are provided, do not show remaining count
+            if not (check_in and check_out):
+                remaining = None
 
             room_dict = RoomResponse.model_validate(room, from_attributes=True).model_dump()
             room_dict.pop("available_quantity", None)
             room_dict.pop("total_quantity", None)
             room_dict["remaining"] = remaining
+            # Attach room rates in search response as well
+            rates = db.query(RoomRate).filter(RoomRate.room_id == room.id).all()
+            room_dict["room_rates"] = [
+                {
+                    "id": rr.id,
+                    "name": rr.name,
+                    "description": rr.description,
+                    "price": rr.price,
+                    "currency": rr.currency or (prop.currency or "USD"),
+                    "includes_breakfast": bool(rr.includes_breakfast),
+                    "includes_parking": bool(rr.includes_parking),
+                    "free_cancellation": bool(rr.free_cancellation),
+                    "refundable_until": rr.refundable_until.isoformat() if rr.refundable_until else None,
+                    "pay_at_property": bool(rr.pay_at_property),
+                }
+                for rr in rates
+            ]
             rooms_with_remaining.append(room_dict)
 
             if room.base_price < min_price and (remaining is None or remaining > 0):
@@ -318,7 +379,11 @@ def get_property_details(
     # Availability and room pricing (now with per-day breakdown and remaining count, only if dates provided)
     avail = []
     prop_rooms = db.query(Room).filter(Room.property_id == property_id).all()
-    tz = ZoneInfo("UTC")  # Default timezone, can be enhanced to accept as param
+    # Default timezone for interpreting inputs
+    tz = DEFAULT_TZ
+    # Normalize date inputs: ensure at least one-night window
+    if check_in and check_out and check_out <= check_in:
+        check_out = check_in + timedelta(days=1)
     if check_in and check_out:
         start_local = check_in if check_in.tzinfo else check_in.replace(tzinfo=tz)
         end_local = check_out if check_out.tzinfo else check_out.replace(tzinfo=tz)
@@ -352,10 +417,19 @@ def get_property_details(
                 day_end_utc = (d_local + timedelta(days=1)).astimezone(ZoneInfo("UTC"))
                 ds = day_start_utc.replace(tzinfo=None)
                 de = day_end_utc.replace(tzinfo=None)
+                now_us = datetime.now(DEFAULT_TZ)
+                now_utc = now_us.astimezone(ZoneInfo("UTC")).replace(tzinfo=None)
+                hold_threshold = now_utc - timedelta(minutes=HOLD_MINUTES)
                 booked_rooms = db.query(func.coalesce(func.sum(Booking.num_rooms), 0)).filter(
                     and_(
                         Booking.room_id == room.id,
-                        Booking.status.in_([BookingStatus.CONFIRMED, BookingStatus.PENDING]),
+                        or_(
+                            Booking.status == BookingStatus.CONFIRMED,
+                            and_(
+                                Booking.status == BookingStatus.PENDING,
+                                Booking.created_at >= hold_threshold,
+                            ),
+                        ),
                         Booking.check_in_date < de,
                         Booking.check_out_date > ds,
                     )
@@ -403,6 +477,23 @@ def get_property_details(
         }
         if check_in and check_out:
             room_block["remaining"] = min_remaining
+        # Include room rates nested under each room in details view
+        rates = db.query(RoomRate).filter(RoomRate.room_id == room.id).all()
+        room_block["room_rates"] = [
+            {
+                "id": rr.id,
+                "name": rr.name,
+                "description": rr.description,
+                "price": rr.price,
+                "currency": rr.currency or (prop.currency or "USD"),
+                "includes_breakfast": bool(rr.includes_breakfast),
+                "includes_parking": bool(rr.includes_parking),
+                "free_cancellation": bool(rr.free_cancellation),
+                "refundable_until": rr.refundable_until.isoformat() if rr.refundable_until else None,
+                "pay_at_property": bool(rr.pay_at_property),
+            }
+            for rr in rates
+        ]
         # Do not include static fields
         # room_block["available_quantity"] = ...
         # room_block["total_quantity"] = ...
@@ -584,7 +675,7 @@ def update_room(
     
     # return RoomResponse.from_orm(room)
 
-@router.get("/rooms/{room_id}", response_model=RoomResponse)
+@router.get("/rooms/{room_id}", response_model=RoomWithRates)
 def get_room(room_id: int, db: Session = Depends(get_db)):
     """Get a specific room."""
     room = db.query(Room).filter(Room.id == room_id).first()
@@ -593,8 +684,11 @@ def get_room(room_id: int, db: Session = Depends(get_db)):
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Room not found"
         )
-    
-    return RoomResponse.model_validate(room, from_attributes=True)
+    # Attach room rates
+    rates = db.query(RoomRate).filter(RoomRate.room_id == room.id).all()
+    room_payload = RoomWithRates.model_validate(room, from_attributes=True).model_dump()
+    room_payload["room_rates"] = [RoomRateResponse.model_validate(rr, from_attributes=True).model_dump() for rr in rates]
+    return RoomWithRates(**room_payload)
     # return RoomResponse.from_orm(room)
 
 @router.delete("/rooms/{room_id}")

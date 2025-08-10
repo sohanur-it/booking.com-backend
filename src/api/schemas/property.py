@@ -173,6 +173,26 @@ class RoomResponse(BaseModel):
     class Config:
         from_attributes = True
 
+class RoomRateResponse(BaseModel):
+    id: int
+    room_id: int
+    name: str | None = None
+    description: str | None = None
+    price: float
+    currency: str
+    includes_breakfast: bool = False
+    includes_parking: bool = False
+    free_cancellation: bool = False
+    refundable_until: datetime | None = None
+    pay_at_property: bool = False
+
+    class Config:
+        from_attributes = True
+
+# Room with Rates
+class RoomWithRates(RoomResponse):
+    room_rates: List[RoomRateResponse] = []
+
 # Property with Rooms
 class PropertyWithRooms(PropertyResponse):
     rooms: List[RoomResponse] = []

@@ -3,10 +3,11 @@ from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import and_, or_
 from typing import List, Optional
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
 from ..database import get_db
 from ..models.booking import Booking, BookingStatus, PaymentStatus, PaymentMethod
-from ..models.property import Room, Property
+from ..models.property import Room, Property, RoomRate
 from ..models.user import User
 from ..schemas.booking import (
     BookingCreate, BookingUpdate, BookingResponse, BookingWithRoom,
@@ -18,6 +19,10 @@ from ..schemas.booking import (
 from ..auth import get_current_active_user, generate_booking_reference, calculate_genius_level
 
 router = APIRouter(prefix="/bookings", tags=["Bookings"])
+
+# Default application timezone (US)
+DEFAULT_TZ = ZoneInfo("America/New_York")
+HOLD_MINUTES = 15  # pending bookings hold window
 
 # Payment methods endpoints (moved to top after router definition)
 @router.post("/payment-methods", response_model=PaymentMethodResponse)
@@ -90,9 +95,22 @@ def calculate_price(
             detail="Room not found"
         )
     
-    # Calculate base price
-    nights = (request.check_out_date - request.check_in_date).days
-    base_price = room.base_price * nights * request.num_rooms
+    # Normalize and interpret dates in US timezone by default
+    ci = request.check_in_date if request.check_in_date.tzinfo else request.check_in_date.replace(tzinfo=DEFAULT_TZ)
+    co = request.check_out_date if request.check_out_date.tzinfo else request.check_out_date.replace(tzinfo=DEFAULT_TZ)
+    # Calculate base price (use selected rate if provided)
+    nights = (co - ci).days
+    unit_price = room.base_price
+    selected_rate: Optional[RoomRate] = None
+    if request.room_rate_id is not None:
+        selected_rate = db.query(RoomRate).filter(
+            RoomRate.id == request.room_rate_id,
+            RoomRate.room_id == request.room_id
+        ).first()
+        if not selected_rate:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid room_rate_id for the selected room")
+        unit_price = selected_rate.price
+    base_price = unit_price * nights * request.num_rooms
     
     # Calculate Genius discount
     genius_discount = 0.0
@@ -152,21 +170,39 @@ def create_booking(
     room = db.query(Room).filter(Room.id == booking_data.room_id).first()
     if not room:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Room not found")
+    # If a room_rate_id is supplied, ensure it belongs to this room
+    if booking_data.room_rate_id is not None:
+        rr_ok = db.query(RoomRate.id).filter(
+            RoomRate.id == booking_data.room_rate_id,
+            RoomRate.room_id == booking_data.room_id
+        ).first()
+        if not rr_ok:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid room_rate_id for the selected room")
 
+    # Normalize and interpret dates in US timezone by default
+    ci = booking_data.check_in_date if booking_data.check_in_date.tzinfo else booking_data.check_in_date.replace(tzinfo=DEFAULT_TZ)
+    co = booking_data.check_out_date if booking_data.check_out_date.tzinfo else booking_data.check_out_date.replace(tzinfo=DEFAULT_TZ)
     # Nights calculation (redundant due to validator but kept for safety)
-    nights = (booking_data.check_out_date - booking_data.check_in_date).days
+    nights = (co - ci).days
     if nights <= 0:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Check-out date must be after check-in date")
 
     # Check room availability for the requested dates
+    # Use UTC boundaries when checking overlap; count confirmed and recent pending holds
     existing_bookings = db.query(Booking).filter(
         and_(
             Booking.room_id == booking_data.room_id,
-            Booking.status.in_([BookingStatus.CONFIRMED, BookingStatus.PENDING]),
+            or_(
+                Booking.status == BookingStatus.CONFIRMED,
+                and_(
+                    Booking.status == BookingStatus.PENDING,
+                    Booking.created_at >= datetime.now(DEFAULT_TZ).astimezone(ZoneInfo("UTC")).replace(tzinfo=None) - timedelta(minutes=HOLD_MINUTES),
+                ),
+            ),
             or_(
                 and_(
-                    Booking.check_in_date < booking_data.check_out_date,
-                    Booking.check_out_date > booking_data.check_in_date
+                    Booking.check_in_date < co.astimezone(ZoneInfo("UTC")).replace(tzinfo=None),
+                    Booking.check_out_date > ci.astimezone(ZoneInfo("UTC")).replace(tzinfo=None)
                 )
             )
         )
@@ -176,11 +212,12 @@ def create_booking(
     if remaining < booking_data.num_rooms:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Room not available for selected dates")
 
-    # Calculate price (assuming you have this implemented)
+    # Calculate price using selected room rate when provided
     price_request = PriceCalculationRequest(
         room_id=booking_data.room_id,
-        check_in_date=booking_data.check_in_date,
-        check_out_date=booking_data.check_out_date,
+        room_rate_id=booking_data.room_rate_id,
+        check_in_date=ci,
+        check_out_date=co,
         num_guests=booking_data.num_guests,
         num_rooms=booking_data.num_rooms,
         user_id=current_user.id
@@ -340,11 +377,27 @@ def quote_cart(
             unavailable.append(item.room_id)
             continue
         currency = room.property.currency if room.property else currency
+        # If a room_rate_id is supplied, ensure it belongs to this room and override price unit
+        selected_rate: Optional[RoomRate] = None
+        if item.room_rate_id is not None:
+            selected_rate = db.query(RoomRate).filter(
+                RoomRate.id == item.room_rate_id,
+                RoomRate.room_id == item.room_id
+            ).first()
+            if not selected_rate:
+                unavailable.append(item.room_id)
+                continue
         # Availability
         overlapping = db.query(Booking).filter(
             and_(
                 Booking.room_id == item.room_id,
-                Booking.status.in_([BookingStatus.CONFIRMED, BookingStatus.PENDING]),
+                or_(
+                    Booking.status == BookingStatus.CONFIRMED,
+                    and_(
+                        Booking.status == BookingStatus.PENDING,
+                        Booking.created_at >= datetime.now(DEFAULT_TZ).astimezone(ZoneInfo("UTC")).replace(tzinfo=None) - timedelta(minutes=HOLD_MINUTES),
+                    ),
+                ),
                 Booking.check_in_date < payload.check_out_date,
                 Booking.check_out_date > payload.check_in_date,
             )
@@ -364,10 +417,14 @@ def quote_cart(
             ))
             continue
 
+        # Normalize dates to default timezone for consistency
+        ci = payload.check_in_date if payload.check_in_date.tzinfo else payload.check_in_date.replace(tzinfo=DEFAULT_TZ)
+        co = payload.check_out_date if payload.check_out_date.tzinfo else payload.check_out_date.replace(tzinfo=DEFAULT_TZ)
         price_req = PriceCalculationRequest(
             room_id=item.room_id,
-            check_in_date=payload.check_in_date,
-            check_out_date=payload.check_out_date,
+            room_rate_id=item.room_rate_id,
+            check_in_date=ci,
+            check_out_date=co,
             num_guests=item.num_guests,
             num_rooms=item.num_rooms,
         )

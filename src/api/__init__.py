@@ -1,4 +1,10 @@
 from fastapi import APIRouter, FastAPI
+import asyncio
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
+from sqlalchemy import and_
+from .database import SessionLocal
+from .models.booking import Booking, BookingStatus
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.utils import get_openapi
 import subprocess
@@ -126,6 +132,42 @@ def create_app():
     app.include_router(metadata.router, prefix="/api/v1")
     app.include_router(packages.router, prefix="/api/v1")
     app.include_router(activities.router, prefix="/api/v1")
+
+    # Background task: expire old pending bookings (runs every minute)
+    async def _expire_stale_pending_bookings_loop() -> None:
+        while True:
+            print("Expiring stale pending bookings...")
+            # wait first to avoid load spikes at startup
+            await asyncio.sleep(60)
+            try:
+                default_tz = ZoneInfo("America/New_York")
+                now_utc = datetime.now(default_tz).astimezone(ZoneInfo("UTC")).replace(tzinfo=None)
+                print(f"Now UTC: {now_utc}")
+                threshold = now_utc - timedelta(minutes=15)
+                db = SessionLocal()
+                stale = db.query(Booking).filter(
+                    and_(
+                        Booking.status == BookingStatus.PENDING,
+                        Booking.created_at < threshold,
+                    )
+                ).all()
+                print(f"Stale bookings: {stale}")
+                if stale:
+                    for b in stale:
+                        b.status = BookingStatus.CANCELLED
+                    db.commit()
+            except Exception:
+                # Avoid crashing app if background job fails
+                pass
+            finally:
+                try:
+                    db.close()
+                except Exception:
+                    pass
+
+    @app.on_event("startup")
+    async def _start_background_tasks() -> None:
+        asyncio.create_task(_expire_stale_pending_bookings_loop())
 
     def custom_openapi():
         """

@@ -21,6 +21,7 @@ class PaymentStatus(str, Enum):
 # Booking Create
 class BookingCreate(BaseModel):
     room_id: int
+    room_rate_id: Optional[int] = None
     check_in_date: datetime
     check_out_date: datetime
     num_guests: int = 1
@@ -166,6 +167,7 @@ class BookingConfirmation(BaseModel):
 # Price Calculation Request
 class PriceCalculationRequest(BaseModel):
     room_id: int
+    room_rate_id: Optional[int] = None
     check_in_date: datetime
     check_out_date: datetime
     num_guests: int = 1
@@ -190,6 +192,7 @@ class PriceCalculationResponse(BaseModel):
 # Cart quoting for multiple rooms
 class CartItem(BaseModel):
     room_id: int
+    room_rate_id: Optional[int] = None
     num_rooms: int = 1
     num_guests: int = 1
 

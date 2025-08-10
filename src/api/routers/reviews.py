@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import and_, or_, func, desc, asc
 from typing import List, Optional
 from datetime import datetime
+from zoneinfo import ZoneInfo
 
 from ..database import get_db
 from ..models.review import Review, ReviewResponse as ReviewResponseModel
@@ -18,6 +19,9 @@ from ..auth import get_current_active_user
 
 router = APIRouter(prefix="/reviews", tags=["Reviews"])
 
+# Default application timezone (US)
+DEFAULT_TZ = ZoneInfo("America/New_York")
+
 @router.post("/", response_model=ReviewResponse)
 def create_review(
     review_data: ReviewCreate,
@@ -26,17 +30,11 @@ def create_review(
 ):
     """Create a new review for a property."""
     
-    # Verify the booking exists, belongs to the user, and matches the property via the booked room
-    booking = (
-        db.query(Booking)
-        .join(Room, Booking.room_id == Room.id)
-        .filter(
-            Booking.id == review_data.booking_id,
-            Booking.user_id == current_user.id,
-            Room.property_id == review_data.property_id,
-        )
-        .first()
-    )
+    # Verify the booking exists and belongs to the user
+    booking = db.query(Booking).filter(
+        Booking.id == review_data.booking_id,
+        Booking.user_id == current_user.id,
+    ).first()
 
     
     if not booking:
@@ -44,6 +42,15 @@ def create_review(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Booking not found or does not belong to you"
         )
+    # Resolve room and property from booking
+    room = db.query(Room).filter(Room.id == booking.room_id).first()
+    if not room:
+        raise HTTPException(status_code=404, detail="Room not found for this booking")
+    derived_property_id = room.property_id
+    # If client supplied property_id and it mismatches, prefer derived one
+    if review_data.property_id is not None and review_data.property_id != derived_property_id:
+        # Optionally, you can 400 here; instead we overwrite to reduce friction
+        pass
     
     # Check if user has already reviewed this booking
     existing_review = db.query(Review).filter(
@@ -62,7 +69,9 @@ def create_review(
         )
     
     # Verify the booking is completed (check-out date has passed)
-    if booking.check_out_date > datetime.utcnow():
+    # Use US timezone for cutoff comparison
+    now_us_naive = datetime.now(DEFAULT_TZ).replace(tzinfo=None)
+    if booking.check_out_date > now_us_naive:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="You can only review completed stays"
@@ -71,7 +80,7 @@ def create_review(
     # Create review
     db_review = Review(
         user_id=current_user.id,
-        property_id=review_data.property_id,
+        property_id=derived_property_id,
         booking_id=review_data.booking_id,
         title=review_data.title,
         content=review_data.content,

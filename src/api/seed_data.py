@@ -10,7 +10,7 @@ from pathlib import Path
 
 from .database import SessionLocal, engine
 from .models.user import User
-from .models.property import Property, Room
+from .models.property import Property, Room, RoomRate
 from .models.booking import Booking, BookingStatus, PaymentStatus, PaymentMethod
 from .models.review import Review, ReviewResponse
 from .models.flight import Airport, Carrier, Flight
@@ -102,6 +102,30 @@ def seed_from_json(data_dir: str | Path | None = None):
                     ))
             db.commit()
 
+            # Nested room rates (if provided)
+            for r in p.get("rooms", []):
+                rates = r.get("rates", [])
+                if not rates:
+                    continue
+                room_obj = db.query(Room).filter(Room.property_id == existing.id, Room.name == r["name"]).first()
+                if not room_obj:
+                    continue
+                for rate in rates:
+                    if not db.query(RoomRate).filter(RoomRate.room_id == room_obj.id, RoomRate.name == rate["name"]).first():
+                        db.add(RoomRate(
+                            room_id=room_obj.id,
+                            name=rate["name"],
+                            description=rate.get("description"),
+                            price=rate.get("price", room_obj.base_price or 0.0),
+                            currency=rate.get("currency", "USD"),
+                            includes_breakfast=rate.get("includes_breakfast", False),
+                            includes_parking=rate.get("includes_parking", False),
+                            free_cancellation=rate.get("free_cancellation", False),
+                            refundable_until=datetime.fromisoformat(rate["refundable_until"]) if rate.get("refundable_until") else None,
+                            pay_at_property=rate.get("pay_at_property", False),
+                        ))
+                db.commit()
+
         # Standalone rooms file
         rooms = _load_json(base_dir / "rooms.json") or []
         for r in rooms:
@@ -116,6 +140,32 @@ def seed_from_json(data_dir: str | Path | None = None):
                     available_quantity=r.get("available_quantity", 1), images=r.get("images"),
                 ))
         db.commit()
+
+        # Room rates for standalone rooms.json (if provided)
+        for r in rooms:
+            if not r.get("rates"):
+                continue
+            prop = db.query(Property).filter(Property.name == r.get("property_name")).first()
+            if not prop:
+                continue
+            room_obj = db.query(Room).filter(Room.property_id == prop.id, Room.name == r["name"]).first()
+            if not room_obj:
+                continue
+            for rate in r["rates"]:
+                if not db.query(RoomRate).filter(RoomRate.room_id == room_obj.id, RoomRate.name == rate["name"]).first():
+                    db.add(RoomRate(
+                        room_id=room_obj.id,
+                        name=rate["name"],
+                        description=rate.get("description"),
+                        price=rate.get("price", room_obj.base_price or 0.0),
+                        currency=rate.get("currency", "USD"),
+                        includes_breakfast=rate.get("includes_breakfast", False),
+                        includes_parking=rate.get("includes_parking", False),
+                        free_cancellation=rate.get("free_cancellation", False),
+                        refundable_until=datetime.fromisoformat(rate["refundable_until"]) if rate.get("refundable_until") else None,
+                        pay_at_property=rate.get("pay_at_property", False),
+                    ))
+            db.commit()
 
         # Airports, carriers, flights
         for a in _load_json(base_dir / "airports.json") or []:
@@ -509,6 +559,71 @@ def seed_database():
             available_quantity=95,
             images=["https://example.com/ocean-view-1.jpg", "https://example.com/ocean-view-2.jpg"]
         )
+
+        # Create sample room rates
+        def get_or_create_rate(room_id: int, name: str, **kwargs) -> RoomRate:
+            rr = db.query(RoomRate).filter(RoomRate.room_id == room_id, RoomRate.name == name).first()
+            if rr:
+                return rr
+            rr = RoomRate(room_id=room_id, name=name, **kwargs)
+            db.add(rr)
+            db.commit()
+            db.refresh(rr)
+            return rr
+
+        # Rates for Property 1 - Deluxe King Room
+        get_or_create_rate(
+            room_id=room1_1.id,
+            name="Non-refundable",
+            description="Cheaper rate with no refund if canceled",
+            price=280.0,
+            currency="USD",
+            includes_breakfast=False,
+            includes_parking=False,
+            free_cancellation=False,
+            refundable_until=None,
+            pay_at_property=False,
+        )
+        get_or_create_rate(
+            room_id=room1_1.id,
+            name="Breakfast included",
+            description="Includes breakfast and free cancellation up to 24h before",
+            price=320.0,
+            currency="USD",
+            includes_breakfast=True,
+            includes_parking=False,
+            free_cancellation=True,
+            refundable_until=datetime.now() + timedelta(days=120),
+            pay_at_property=True,
+        )
+
+        # Example rate for Executive Suite
+        get_or_create_rate(
+            room_id=room1_2.id,
+            name="Flexible rate",
+            description="Free cancellation until 2 days before arrival",
+            price=520.0,
+            currency="USD",
+            includes_breakfast=False,
+            includes_parking=False,
+            free_cancellation=True,
+            refundable_until=datetime.now() + timedelta(days=60),
+            pay_at_property=True,
+        )
+
+        # Example rate for Ocean View Room
+        get_or_create_rate(
+            room_id=room3_1.id,
+            name="Early bird",
+            description="Non-refundable early booking discount",
+            price=230.0,
+            currency="USD",
+            includes_breakfast=False,
+            includes_parking=False,
+            free_cancellation=False,
+            refundable_until=None,
+            pay_at_property=False,
+        )
         
         # Create sample bookings
         print("Creating sample bookings...")
@@ -635,6 +750,8 @@ def seed_database():
         print(f"Created {db.query(Booking).count()} bookings")
         print(f"Created {db.query(Review).count()} reviews")
         print(f"Created {db.query(PaymentMethod).count()} payment methods")
+        from sqlalchemy import func as _func
+        print(f"Created {db.query(RoomRate).count()} room rates")
         
         # Seed flights (airports, carriers, flights)
         print("Creating sample flights...")
