@@ -162,13 +162,14 @@ class RoomResponse(BaseModel):
     size_sqm: Optional[float]
     room_amenities: Optional[List[str]]
     base_price: float
-    genius_price: Optional[float]
+    # genius_price: Optional[float]
     total_quantity: Optional[int] = None
     available_quantity: Optional[int] = None
     images: Optional[List[str]]
     created_at: datetime
     updated_at: datetime
     remaining: Optional[int] = None
+    pricing: Optional[Dict] = None
     
     class Config:
         from_attributes = True
