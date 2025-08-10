@@ -216,8 +216,17 @@ def search_properties(
                         )
                     ).scalar() or 0
 
-                    total_qty = room.available_quantity or 0
-                    available = max(0, total_qty - int(booked_rooms))
+                    print(f"Booked rooms: {booked_rooms} room id: {room.id} check_in: {check_in} check_out: {check_out}")
+                    print(f"Available quantity: {room.available_quantity}")
+                    print(f"Total quantity: {room.total_quantity}")
+
+                    # Determine operational capacity: prefer available_quantity as a cap, fall back to total_quantity
+                    capacity = (
+                        room.available_quantity
+                        if room.available_quantity is not None
+                        else (room.total_quantity or 0)
+                    )
+                    available = max(0, capacity - int(booked_rooms))
                     if min_remaining is None or available < min_remaining:
                         min_remaining = available
                 # Fallback if no days iterated (edge case)
@@ -241,8 +250,12 @@ def search_properties(
                             Booking.check_out_date > ds,
                         )
                     ).scalar() or 0
-                    total_qty = room.available_quantity or 0
-                    min_remaining = max(0, total_qty - int(booked_rooms))
+                    capacity = (
+                        room.available_quantity
+                        if room.available_quantity is not None
+                        else (room.total_quantity or 0)
+                    )
+                    min_remaining = max(0, capacity - int(booked_rooms))
 
             remaining = min_remaining
             # If dates are provided and the room cannot satisfy the requested number of rooms, skip it
@@ -434,13 +447,17 @@ def get_property_details(
                         Booking.check_out_date > ds,
                     )
                 ).scalar() or 0
-                total_qty = room.available_quantity or 0
-                available = max(0, total_qty - int(booked_rooms))
+                capacity = (
+                    room.available_quantity
+                    if room.available_quantity is not None
+                    else (room.total_quantity or 0)
+                )
+                available = max(0, capacity - int(booked_rooms))
                 day_key = d_local.date().isoformat()
                 daily.append({
                     "date": day_key,
                     "available": available,
-                    "total": total_qty,
+                    "total": capacity,
                 })
                 if available > 0:
                     available_dates.append(day_key)

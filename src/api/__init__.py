@@ -12,6 +12,7 @@ import sys
 import os
 
 from .database import create_tables, check_tables_exist
+from .database import engine as _db_engine
 from .routers import auth, properties, bookings, reviews
 from .routers import flights, car_rentals, filters, metadata, packages, activities
 from .seed_data import seed_database
@@ -165,9 +166,9 @@ def create_app():
                 except Exception:
                     pass
 
-    @app.on_event("startup")
-    async def _start_background_tasks() -> None:
-        asyncio.create_task(_expire_stale_pending_bookings_loop())
+    # @app.on_event("startup")
+    # async def _start_background_tasks() -> None:
+    #     asyncio.create_task(_expire_stale_pending_bookings_loop())
 
     def custom_openapi():
         """
@@ -263,5 +264,18 @@ def create_app():
         return app.openapi_schema
 
     app.openapi = custom_openapi
+
+    @app.on_event("startup")
+    async def _log_database_in_use() -> None:
+        try:
+            if _db_engine.url.get_backend_name() == "sqlite":
+                db_file = _db_engine.url.database or ""
+                import os as _os
+                abs_path = _os.path.abspath(db_file)
+                print(f"Using SQLite database file: {abs_path}")
+            else:
+                print(f"Using database URL: {_db_engine.url}")
+        except Exception as _e:
+            print(f"Database URL logging failed: {_e}")
 
     return app
